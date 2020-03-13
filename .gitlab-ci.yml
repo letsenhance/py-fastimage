@@ -1,0 +1,11 @@
+image: fkrull/multi-python
+
+stages:
+  - test
+
+tox:
+  stage: test
+  tags:
+    - docker
+  script:
+    - tox
