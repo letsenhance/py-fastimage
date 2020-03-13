@@ -35,7 +35,7 @@ class ImageHeaderTestCase(unittest.TestCase):
     def test_generic_webp(self):
         self.assertEqual(((123, 45), 'webp'),
                          bytes_to_size_fmt(self._read_file_header('123x45_vp8.webp')))
-        # todo:
+        # todo: discuss: support webp with vp8l and vp8x bitstream
         # self.assertEqual(((123, 45), 'webp',), bytes_to_size_fmt(self._read_file_header('123x45_vp8l.webp')))
         # self.assertEqual(((123, 45), 'webp',), bytes_to_size_fmt(self._read_file_header('123x45_vp8x.webp')))
 
@@ -59,10 +59,11 @@ class ImageHeaderTestCase(unittest.TestCase):
         self.assertEqual(((123, 45), 'tif'),
                          bytes_to_size_fmt(self._read_file_header('123x45_zip.tif')))
 
-        # todo: check if occurs in prod
+        # todo: discuss: support tif with mac byte order
+        #  haven't seen in prod logs, but in PS you can save file with such encoding
         # self.assertEqual(((123, 45), 'tif',), bytes_to_size_fmt(self._read_file_header('123x45_mac_byte_order.tif')))
 
-    # todo: discuss: supported formats (+heic)
+    # todo: discuss: support heic format
     # def test_generic_heic(self):
     #     # iphone photo format
     #     self.assertEqual(((123, 45), 'heic',), bytes_to_size_fmt(self._read_file_header('123x45.heic')))

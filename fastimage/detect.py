@@ -178,11 +178,14 @@ def tiff(bytes):
 
 def bytes_to_size_fmt(bytes) -> Tuple[Optional[Tuple[int, int]], Optional[str]]:
     """
-    Get image file size and type based on header
+    Get image file size and type based on header, for best result use whole file.
 
-    for best result - pass whole bytes of whole file
-    :param bytes: header of full image bytes
-    :return: (w,h), format
+    In some edge cases: (e.g. large metadata) we can determinate only format without image size info
+    :param bytes: header or whole image
+    :return:
+        ((w,h), format) - known image
+        (None, format) - can not determinate size info
+        (None, None) - unknown image format
     """
     result = None, None
     if len(bytes) < 24:
