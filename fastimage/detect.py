@@ -19,7 +19,7 @@ __all__ = (
     'ImageFormat',
 )
 
-IMAGE_HEADER_MIN_SIZE = 384 * 1024  # 384kb, some jpg images have huge meta info, should be enough
+IMAGE_HEADER_MIN_SIZE = 800 * 1024  # 384kb, some jpg images have huge meta info, should be enough
 # gif - 10b
 # jpg - ?? looks like 256b is enough
 # png - 24b
