@@ -77,3 +77,5 @@ class ImageHeaderTestCase(unittest.TestCase):
         # occurs on small and large jpg images, with some specific info in header
         self.assertEqual(((3089, 2184), 'jpg'),
                          bytes_to_size_fmt(self._read_file_header('1274-crop_bad_metadata.jpg')))
+        self.assertEqual(((4096, 4096), 'jpg'),
+                         bytes_to_size_fmt(self._read_file_header('large_metadata.jpg')))  # 749kb of metadata
