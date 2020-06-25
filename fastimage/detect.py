@@ -22,6 +22,13 @@ __all__ = (
 IMAGE_HEADER_MIN_SIZE = 800 * 1024  # 800kb, some jpg images have huge meta info, should be enough
 # gif - 10b
 # jpg - ?? looks like 256b is enough
+#   Each APPN data area has a length field that is 2 bytes, so 65536 would hold the biggest one.
+#   If you are just worried about the EXIF data, it would be a bit less.
+#   http://www.fileformat.info/format/jpeg/egff.htm There are at most 16 different APPN markers in
+#   a single file. I don't think they can be repeated, so 16*65K should be the theoretical max.
+#   ----
+#   So, at max, data before image size block may take up to 16*65kb = 1040 * 1024 bytes + few bytes for data
+#   1100kb should be enough
 # png - 24b
 # webp - 31b
 # tiff - ??
