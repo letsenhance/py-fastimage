@@ -126,7 +126,7 @@ def tiff(bytes):
         # Standard TIFF, big- or little-endian
         # BigTIFF and other different but TIFF-like formats are not supported currently
         byteOrder = bytes[:2]
-        boChar = '>' if byteOrder == 'MM' else '<'
+        boChar = '>' if byteOrder == b'MM' else '<'
         # maps TIFF type id to size (in bytes)
         # and python format char for struct
         tiffTypes = {
