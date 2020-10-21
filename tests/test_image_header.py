@@ -58,10 +58,8 @@ class ImageHeaderTestCase(unittest.TestCase):
                          bytes_to_size_fmt(self._read_file_header('123x45_lzw.tif')))
         self.assertEqual(((123, 45), 'tif'),
                          bytes_to_size_fmt(self._read_file_header('123x45_zip.tif')))
-
-        # todo: discuss: support tif with mac byte order
-        #  haven't seen in prod logs, but in PS you can save file with such encoding
-        # self.assertEqual(((123, 45), 'tif',), bytes_to_size_fmt(self._read_file_header('123x45_mac_byte_order.tif')))
+        self.assertEqual(((123, 45), 'tif',),
+                         bytes_to_size_fmt(self._read_file_header('123x45_mac_byte_order.tif')))
 
     # todo: discuss: support heic format
     # def test_generic_heic(self):
