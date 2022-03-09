@@ -306,7 +306,7 @@ class IsoBmff:
         data = self.input.read(box_size)
         width = struct.unpack('!I', data[4:8])[0]
         height = struct.unpack('!I', data[8:12])[0]
-        self.ispe_boxes.append({'index': index, 'size': [width, height]})
+        self.ispe_boxes.append({'index': index, 'size': (width, height)})
 
     def read_boxes(self, box_size=None):
         index = 0
