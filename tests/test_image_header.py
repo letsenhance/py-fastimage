@@ -77,3 +77,9 @@ class ImageHeaderTestCase(unittest.TestCase):
                          bytes_to_size_fmt(self._read_file_header('1274-crop_bad_metadata.jpg')))
         self.assertEqual(((4096, 4096), 'jpg'),
                          bytes_to_size_fmt(self._read_file_header('large_metadata.jpg')))  # 749kb of metadata
+
+    def test_generic_avif(self):
+        self.assertEqual(((123, 45), 'avif'),
+                         bytes_to_size_fmt(self._read_file_header('123x45.avif')))
+        self.assertEqual(((123, 45), 'avif'),
+                         bytes_to_size_fmt(self._read_file_header('123x45_compress.avif')))

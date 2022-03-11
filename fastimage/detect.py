@@ -42,6 +42,7 @@ class ImageFormat:  # not enum to keep all parent code as is
     tif = 'tif'
     bmp = 'bmp'
     webp = 'webp'
+    avif = 'avif'
 
 
 def gif(bytes):
@@ -183,6 +184,166 @@ def tiff(bytes):
     return None
 
 
+class IsoBmff:
+    # HEIC/AVIF are a special case of the general ISO_BMFF format, in which all data is encapsulated in typed boxes,
+    # with a mandatory ftyp box that is used to indicate particular file types. Is composed of nested "boxes". Each
+    # box has a header composed of
+    # - Size (32 bit integer)
+    # - Box type (4 chars)
+    # - Extended size: only if size === 1, the type field is followed by 64 bit integer of extended size
+    # - Payload: Type-dependent
+    # ____________________________________________________
+    # Translated from Ruby to Python for Letsenhance/Claid
+    #
+    # Ruby implementation
+    #   for HEIC: https://github.com/sdsykes/fastimage/pull/125/files
+    #   for AVIF: https://github.com/sdsykes/fastimage/pull/135/files
+    #
+    # ISOBMFF Box Structure Viewer: https://gpac.github.io/mp4box.js/test/filereader.html
+
+    def __init__(self, bytes):
+        self.bytes = bytes
+        self.rotation = 0
+        self.primary_box = None
+        self.ipma_boxes = []
+        self.ispe_boxes = []
+        self.final_size = None
+
+        self.finish_processing = False
+        self.input = BytesIO(self.bytes)
+
+    @staticmethod
+    def get_widht_and_height(bytes):
+        iso_bmff = IsoBmff(bytes=bytes)
+        iso_bmff.read_boxes()
+        size = iso_bmff.final_size
+
+        if iso_bmff.rotation in {90, 270}:
+            size.reverse()
+
+        return size or None
+
+    def read_uint8(self):
+        return struct.unpack('B', self.input.read(1))[0]
+
+    def read_uint16(self):
+        return struct.unpack('!H', self.input.read(2))[0]
+
+    def read_uint32(self):
+        return struct.unpack('!I', self.input.read(4))[0]
+
+    def read_box_header(self):
+        size = self.read_uint32()
+        type = self.input.read(4)
+
+        return [type, size - 8]
+
+    def handle_irot_box(self):
+        self.rotation = (self.read_uint8() & 0x3) * 90
+
+    def handle_meta_box(self, box_size):
+        if box_size < 4:
+            self.finish_processing = True
+            return
+
+        self.input.read(4)
+        self.read_boxes(box_size=box_size-4)
+        if not self.primary_box:
+            self.finish_processing = True
+            return
+
+        primary_indices = []
+        for ipma_box in self.ipma_boxes:
+            if ipma_box['id'] == self.primary_box:
+                primary_indices.append(ipma_box['property_index'])
+
+        ispe_box = None
+        for box in self.ispe_boxes:
+            if box['index'] in primary_indices:
+                ispe_box = box
+
+        if ispe_box:
+            self.final_size = ispe_box['size']
+
+        self.finish_processing = True
+
+    def handle_hdlr_box(self, box_size):
+        if box_size < 12:
+            self.finish_processing = True
+            return
+
+        data = self.input.read(box_size)
+        if data[8:12] != b'pict':
+            self.finish_processing = True
+
+    def handle_pitm_box(self, box_size):
+        data = self.input.read(box_size)
+        self.primary_box = struct.unpack('!H', data[4:6])[0]
+
+    def handle_ipma_box(self, box_size):
+        self.input.read(3)
+
+        flags3 = self.read_uint8()
+        entries_count = self.read_uint32()
+
+        for _ in range(entries_count):
+            id = self.read_uint16()
+            essen_count = self.read_uint8()
+
+            for __ in range(essen_count):
+                property_index = self.read_uint8() & 0x7F
+
+                if flags3 & 1 == 1:
+                    property_index = (property_index << 7) + self.read_uint8()
+
+                self.ipma_boxes.append({'id': id, 'property_index': property_index - 1})
+
+    def handle_ispe_box(self, box_size, index):
+        if box_size < 12:
+            self.finish_processing = True
+            return
+
+        data = self.input.read(box_size)
+        width = struct.unpack('!I', data[4:8])[0]
+        height = struct.unpack('!I', data[8:12])[0]
+        self.ispe_boxes.append({'index': index, 'size': (width, height)})
+
+    def read_boxes(self, box_size=None):
+        index = 0
+
+        end_pos = None if box_size is None else self.input.tell() + box_size
+
+        while True:
+            if end_pos and self.input.tell() >= end_pos:
+                return
+
+            if self.finish_processing:
+                return
+
+            box_type, box_size = self.read_box_header()
+            if box_type == b'meta':
+                self.handle_meta_box(box_size)
+            elif box_type == b'pitm':
+                self.handle_pitm_box(box_size)
+            elif box_type == b'ipma':
+                self.handle_ipma_box(box_size)
+            elif box_type == b'hdlr':
+                self.handle_hdlr_box(box_size)
+            elif box_type in (b'iprp', b'ipco'):
+                self.read_boxes(box_size)
+            elif box_type == b'irot':
+                self.handle_irot_box()
+            elif box_type == b'ispe':
+                self.handle_ispe_box(box_size, index)
+            elif box_type == b'mdat':
+                self.finish_processing = True
+                return
+            else:
+                self.input.read(box_size)
+
+            index += 1
+
+
 def bytes_to_size_fmt(bytes) -> Tuple[Optional[Tuple[int, int]], Optional[str]]:
     """
     Get image file size and type based on header, for best result use whole file.
@@ -211,6 +372,9 @@ def bytes_to_size_fmt(bytes) -> Tuple[Optional[Tuple[int, int]], Optional[str]]:
         result = bmp(bytes), ImageFormat.bmp
     elif peek == b'RI' and bytes[8:12] == b'WEBP':
         result = webp(bytes), ImageFormat.webp
+    elif peek == b'\x00\x00' and bytes[4:12] == b'ftypavif':
+        size = IsoBmff.get_widht_and_height(bytes=bytes)
+        result = size, ImageFormat.avif
 
     if result[0] is None and result[1] is not None:
         logger.warning("Can't read size info of %s image, first 256 bytes: %r " % (result[1], bytes[:256]))
