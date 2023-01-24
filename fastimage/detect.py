@@ -43,6 +43,7 @@ class ImageFormat:  # not enum to keep all parent code as is
     bmp = 'bmp'
     webp = 'webp'
     avif = 'avif'
+    heif = 'heif'
 
 
 def gif(bytes):
@@ -372,9 +373,17 @@ def bytes_to_size_fmt(bytes) -> Tuple[Optional[Tuple[int, int]], Optional[str]]:
         result = bmp(bytes), ImageFormat.bmp
     elif peek == b'RI' and bytes[8:12] == b'WEBP':
         result = webp(bytes), ImageFormat.webp
-    elif peek == b'\x00\x00' and bytes[4:12] == b'ftypavif':
+    elif peek == b'\x00\x00':
         size = IsoBmff.get_widht_and_height(bytes=bytes)
-        result = size, ImageFormat.avif
+        ftyp = bytes[4:12]
+        if ftyp == b'ftypavif':
+            result = size, ImageFormat.avif
+        elif ftyp in {b'ftypheic', b'ftypmif1', b'ftypheix', b'ftyphevc', b'ftyphevx'}:
+            result = size, ImageFormat.heif
+        else:
+            logger.warning("Can't determine image format of image in ISO_BMFF format, "
+                           "unexpected 'ftyp' box at the 5th bytes: %s " % ftyp)
+            result = size, None
 
     if result[0] is None and result[1] is not None:
         logger.warning("Can't read size info of %s image, first 256 bytes: %r " % (result[1], bytes[:256]))
