@@ -378,7 +378,7 @@ def bytes_to_size_fmt(bytes) -> Tuple[Optional[Tuple[int, int]], Optional[str]]:
         ftyp = bytes[4:12]
         if ftyp == b'ftypavif':
             result = size, ImageFormat.avif
-        elif ftyp in {b'ftypheic', b'ftypmif1', b'ftypheix', b'ftyphevc', b'ftyphevx'}:
+        elif ftyp in {b'ftypheic', b'ftypmif1', b'ftypheix', b'ftyphevc', b'ftyphevx', b'ftypmsf1'}:
             result = size, ImageFormat.heif
         else:
             logger.warning("Can't determine image format of image in ISO_BMFF format, "
