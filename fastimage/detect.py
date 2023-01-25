@@ -220,7 +220,7 @@ class IsoBmff:
         size = iso_bmff.final_size
 
         if iso_bmff.rotation in {90, 270}:
-            size.reverse()
+            size = tuple(reversed(size))
 
         return size or None
 
