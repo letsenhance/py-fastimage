@@ -43,6 +43,7 @@ class ImageFormat:  # not enum to keep all parent code as is
     bmp = 'bmp'
     webp = 'webp'
     avif = 'avif'
+    heic = 'heic'
 
 
 def gif(bytes):
@@ -219,7 +220,7 @@ class IsoBmff:
         size = iso_bmff.final_size
 
         if iso_bmff.rotation in {90, 270}:
-            size.reverse()
+            size = tuple(reversed(size))
 
         return size or None
 
@@ -375,6 +376,9 @@ def bytes_to_size_fmt(bytes) -> Tuple[Optional[Tuple[int, int]], Optional[str]]:
     elif peek == b'\x00\x00' and bytes[4:12] == b'ftypavif':
         size = IsoBmff.get_widht_and_height(bytes=bytes)
         result = size, ImageFormat.avif
+    elif peek == b'\x00\x00' and bytes[4:12] == b'ftypheic':
+        size = IsoBmff.get_widht_and_height(bytes=bytes)
+        result = size, ImageFormat.heic
 
     if result[0] is None and result[1] is not None:
         logger.warning("Can't read size info of %s image, first 256 bytes: %r " % (result[1], bytes[:256]))
