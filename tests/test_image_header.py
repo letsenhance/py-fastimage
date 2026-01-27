@@ -83,3 +83,162 @@ class ImageHeaderTestCase(unittest.TestCase):
                          bytes_to_size_fmt(self._read_file_header('123x45.avif')))
         self.assertEqual(((123, 45), 'avif'),
                          bytes_to_size_fmt(self._read_file_header('123x45_compress.avif')))
+
+    def test_jpeg_exif_orientation(self):
+        """Test JPEG with EXIF orientation tags"""
+        import struct
+        from io import BytesIO
+
+        def create_jpeg_with_orientation(width, height, orientation):
+            """Create a minimal JPEG with EXIF orientation tag"""
+            buf = BytesIO()
+            buf.write(b'\xff\xd8')  # SOI
+            buf.write(b'\xff\xe1')  # APP1
+            
+            exif_data = BytesIO()
+            exif_data.write(b'Exif\x00\x00')
+            exif_data.write(b'II')  # little-endian
+            exif_data.write(struct.pack('<H', 42))
+            exif_data.write(struct.pack('<I', 8))
+            exif_data.write(struct.pack('<H', 1))  # 1 IFD entry
+            exif_data.write(struct.pack('<H', 0x0112))  # orientation tag
+            exif_data.write(struct.pack('<H', 3))  # SHORT type
+            exif_data.write(struct.pack('<I', 1))  # count
+            exif_data.write(struct.pack('<H', orientation))
+            exif_data.write(struct.pack('<H', 0))
+            exif_data.write(struct.pack('<I', 0))
+            
+            exif_bytes = exif_data.getvalue()
+            buf.write(struct.pack('>H', len(exif_bytes) + 2))
+            buf.write(exif_bytes)
+            
+            buf.write(b'\xff\xc0')  # SOF0
+            buf.write(struct.pack('>H', 17))
+            buf.write(b'\x08')
+            buf.write(struct.pack('>H', height))
+            buf.write(struct.pack('>H', width))
+            buf.write(b'\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01')
+            buf.write(b'\xff\xda')  # SOS
+            
+            return buf.getvalue()
+
+        # Test orientations 1-4 (no dimension swap)
+        for orientation in range(1, 5):
+            data = create_jpeg_with_orientation(100, 200, orientation)
+            self.assertEqual(((100, 200), 'jpg'), bytes_to_size_fmt(data))
+
+        # Test orientations 5-8 (dimensions swapped)
+        for orientation in range(5, 9):
+            data = create_jpeg_with_orientation(100, 200, orientation)
+            self.assertEqual(((200, 100), 'jpg'), bytes_to_size_fmt(data))
+
+    def test_tiff_orientation(self):
+        """Test TIFF with orientation tags"""
+        import struct
+        from io import BytesIO
+
+        def create_tiff_with_orientation(width, height, orientation):
+            """Create a minimal TIFF with orientation tag"""
+            buf = BytesIO()
+            buf.write(b'II')  # little-endian
+            buf.write(struct.pack('<H', 42))
+            buf.write(struct.pack('<I', 8))
+            buf.write(struct.pack('<H', 3))  # 3 entries
+            
+            # Width
+            buf.write(struct.pack('<H', 256))
+            buf.write(struct.pack('<H', 4))
+            buf.write(struct.pack('<I', 1))
+            buf.write(struct.pack('<I', width))
+            
+            # Height
+            buf.write(struct.pack('<H', 257))
+            buf.write(struct.pack('<H', 4))
+            buf.write(struct.pack('<I', 1))
+            buf.write(struct.pack('<I', height))
+            
+            # Orientation
+            buf.write(struct.pack('<H', 274))
+            buf.write(struct.pack('<H', 3))
+            buf.write(struct.pack('<I', 1))
+            buf.write(struct.pack('<H', orientation))
+            buf.write(struct.pack('<H', 0))
+            
+            buf.write(struct.pack('<I', 0))
+            return buf.getvalue()
+
+        # Test orientations 1-4 (no dimension swap)
+        for orientation in range(1, 5):
+            data = create_tiff_with_orientation(100, 200, orientation)
+            self.assertEqual(((100, 200), 'tif'), bytes_to_size_fmt(data))
+
+        # Test orientations 5-8 (dimensions swapped)
+        for orientation in range(5, 9):
+            data = create_tiff_with_orientation(100, 200, orientation)
+            self.assertEqual(((200, 100), 'tif'), bytes_to_size_fmt(data))
+
+    def test_jpeg_exif_fail_tolerance(self):
+        """Test JPEG EXIF parsing handles malformed data gracefully"""
+        import struct
+        from io import BytesIO
+
+        # Test 1: JPEG with truncated EXIF
+        buf = BytesIO()
+        buf.write(b'\xff\xd8\xff\xe1\x00\x0cExif\x00\x00II')
+        result = bytes_to_size_fmt(buf.getvalue())
+        self.assertEqual(result[1], None)  # should not crash
+
+        # Test 2: JPEG with invalid byte order but valid SOF
+        buf = BytesIO()
+        buf.write(b'\xff\xd8\xff\xe1')
+        buf.write(struct.pack('>H', 30))
+        buf.write(b'Exif\x00\x00XX')  # invalid byte order
+        buf.write(b'\x00' * 20)  # padding
+        buf.write(b'\xff\xc0\x00\x11\x08')
+        buf.write(struct.pack('>HH', 100, 50))
+        buf.write(b'\x03\x01"\x00\x02\x11\x01\x03\x11\x01\xff\xda')
+        result = bytes_to_size_fmt(buf.getvalue())
+        self.assertEqual(result, ((50, 100), 'jpg'))  # should return dims with orientation=1
+
+        # Test 3: JPEG with orientation value out of range
+        buf = BytesIO()
+        buf.write(b'\xff\xd8\xff\xe1')
+        exif_data = BytesIO()
+        exif_data.write(b'Exif\x00\x00II')
+        exif_data.write(struct.pack('<H', 42))
+        exif_data.write(struct.pack('<I', 8))
+        exif_data.write(struct.pack('<H', 1))  # 1 entry
+        exif_data.write(struct.pack('<HHIH', 0x0112, 3, 1, 99))  # invalid orientation
+        exif_data.write(struct.pack('<I', 0))
+        exif_bytes = exif_data.getvalue()
+        buf.write(struct.pack('>H', len(exif_bytes) + 2))
+        buf.write(exif_bytes)
+        buf.write(b'\xff\xc0\x00\x11\x08')
+        buf.write(struct.pack('>HH', 100, 50))
+        buf.write(b'\x03\x01"\x00\x02\x11\x01\x03\x11\x01\xff\xda')
+        result = bytes_to_size_fmt(buf.getvalue())
+        self.assertEqual(result, ((50, 100), 'jpg'))  # invalid orientation ignored
+
+    def test_tiff_orientation_fail_tolerance(self):
+        """Test TIFF orientation parsing handles malformed data gracefully"""
+        import struct
+        from io import BytesIO
+
+        # Test 1: TIFF with orientation value out of range
+        buf = BytesIO()
+        buf.write(b'II')
+        buf.write(struct.pack('<H', 42))
+        buf.write(struct.pack('<I', 8))
+        buf.write(struct.pack('<H', 3))  # 3 entries
+        buf.write(struct.pack('<HHII', 256, 4, 1, 100))  # width
+        buf.write(struct.pack('<HHII', 257, 4, 1, 50))   # height
+        buf.write(struct.pack('<HHIHH', 274, 3, 1, 999, 0))  # invalid orientation
+        buf.write(struct.pack('<I', 0))
+        result = bytes_to_size_fmt(buf.getvalue())
+        self.assertEqual(result, ((100, 50), 'tif'))  # invalid orientation ignored
+
+        # Test 2: TIFF with truncated data
+        buf = BytesIO()
+        buf.write(b'II\x2a\x00\x08\x00\x00\x00\x03\x00')  # claims 3 entries but truncated
+        result = bytes_to_size_fmt(buf.getvalue())
+        self.assertEqual(result[0], None)  # should not crash
