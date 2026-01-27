@@ -68,11 +68,23 @@ def jpeg(bytes):
             while ord(b) == 0xFF:
                 b = fhandle.read(1)
             marker = ord(b)
+            # Stop at SOS (Start Of Scan) marker - image data begins here
+            if marker == 0xDA:
+                break
             if 0xC0 <= marker <= 0xC3:
-                fhandle.read(3)
+                # Start Of Frame markers contain the image dimensions.
+                # Read the segment length so we can correctly skip any remaining bytes.
+                segment_length = struct.unpack('>H', fhandle.read(2))[0]
+                # Precision (1 byte) + height (2 bytes) + width (2 bytes)
+                fhandle.read(1)
                 h, w = struct.unpack('>HH', fhandle.read(4))
                 width, height = int(w), int(h)
-                break
+                # Consume any remaining bytes in this SOF segment to keep parsing aligned.
+                # segment_length includes the 2-byte length field itself, so subtract 2 + bytes already read (1+4=5)
+                remaining = segment_length - 2 - 5
+                if remaining > 0:
+                    fhandle.read(remaining)
+                # Continue scanning for orientation if not found yet
             else:
                 segment_length = int(struct.unpack('>H', fhandle.read(2))[0]) - 2
                 # check for EXIF data in APP1 marker

@@ -132,6 +132,46 @@ class ImageHeaderTestCase(unittest.TestCase):
             data = create_jpeg_with_orientation(100, 200, orientation)
             self.assertEqual(((200, 100), 'jpg'), bytes_to_size_fmt(data))
 
+    def test_jpeg_exif_after_sof(self):
+        """Test JPEG with EXIF APP1 appearing AFTER SOF marker (edge case)"""
+        import struct
+        from io import BytesIO
+        
+        # Create JPEG with SOF BEFORE APP1 - ensures we continue scanning
+        buf = BytesIO()
+        buf.write(b'\xff\xd8')  # SOI
+        
+        # First comes SOF0 (with dimensions)
+        buf.write(b'\xff\xc0')  # SOF0
+        buf.write(struct.pack('>H', 17))
+        buf.write(b'\x08')
+        buf.write(struct.pack('>HH', 200, 100))  # height=200, width=100
+        buf.write(b'\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01')
+        
+        # NOW comes APP1 with orientation=6 (should swap dimensions)
+        buf.write(b'\xff\xe1')  # APP1
+        exif_data = BytesIO()
+        exif_data.write(b'Exif\x00\x00')
+        exif_data.write(b'II')  # little-endian
+        exif_data.write(struct.pack('<H', 42))
+        exif_data.write(struct.pack('<I', 8))
+        exif_data.write(struct.pack('<H', 1))
+        exif_data.write(struct.pack('<H', 0x0112))
+        exif_data.write(struct.pack('<H', 3))
+        exif_data.write(struct.pack('<I', 1))
+        exif_data.write(struct.pack('<H', 6))  # orientation = 6
+        exif_data.write(struct.pack('<H', 0))
+        exif_data.write(struct.pack('<I', 0))
+        exif_bytes = exif_data.getvalue()
+        buf.write(struct.pack('>H', len(exif_bytes) + 2))
+        buf.write(exif_bytes)
+        
+        buf.write(b'\xff\xda')  # SOS
+        
+        result = bytes_to_size_fmt(buf.getvalue())
+        # Should swap dimensions even though APP1 came after SOF
+        self.assertEqual(((200, 100), 'jpg'), result)
+
     def test_tiff_orientation(self):
         """Test TIFF with orientation tags"""
         import struct
@@ -182,11 +222,12 @@ class ImageHeaderTestCase(unittest.TestCase):
         import struct
         from io import BytesIO
 
-        # Test 1: JPEG with truncated EXIF
+        # Test 1: JPEG with truncated EXIF (pad to ≥24 bytes so it reaches JPEG parser)
         buf = BytesIO()
         buf.write(b'\xff\xd8\xff\xe1\x00\x0cExif\x00\x00II')
+        buf.write(b'\x00' * 10)  # padding to reach 24 bytes minimum
         result = bytes_to_size_fmt(buf.getvalue())
-        self.assertEqual(result[1], None)  # should not crash
+        self.assertEqual(result[1], 'jpg')  # should detect format even with truncated EXIF
 
         # Test 2: JPEG with invalid byte order but valid SOF
         buf = BytesIO()
@@ -208,7 +249,7 @@ class ImageHeaderTestCase(unittest.TestCase):
         exif_data.write(struct.pack('<H', 42))
         exif_data.write(struct.pack('<I', 8))
         exif_data.write(struct.pack('<H', 1))  # 1 entry
-        exif_data.write(struct.pack('<HHIH', 0x0112, 3, 1, 99))  # invalid orientation
+        exif_data.write(struct.pack('<HHIHH', 0x0112, 3, 1, 99, 0))  # invalid orientation, 12-byte IFD entry
         exif_data.write(struct.pack('<I', 0))
         exif_bytes = exif_data.getvalue()
         buf.write(struct.pack('>H', len(exif_bytes) + 2))
@@ -237,8 +278,9 @@ class ImageHeaderTestCase(unittest.TestCase):
         result = bytes_to_size_fmt(buf.getvalue())
         self.assertEqual(result, ((100, 50), 'tif'))  # invalid orientation ignored
 
-        # Test 2: TIFF with truncated data
+        # Test 2: TIFF with truncated data (pad to ≥24 bytes so it reaches TIFF parser)
         buf = BytesIO()
         buf.write(b'II\x2a\x00\x08\x00\x00\x00\x03\x00')  # claims 3 entries but truncated
+        buf.write(b'\x00' * 14)  # padding to reach 24 bytes minimum
         result = bytes_to_size_fmt(buf.getvalue())
-        self.assertEqual(result[0], None)  # should not crash
+        self.assertEqual(result, (None, 'tif'))  # should detect format with truncated IFD

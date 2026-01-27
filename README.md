@@ -13,7 +13,7 @@ The library automatically handles rotation metadata for formats that support it:
 - **TIFF**: Orientation tags (tag 274)
 - **HEIC/AVIF**: irot box in ISO BMFF structure
 
-Dimensions are automatically swapped for 90° and 270° rotations (EXIF orientations 5, 6, 7, 8) 
+Dimensions are automatically swapped for 90° and 270° rotations (EXIF orientations 5, 6, 7, 8)
 to match the displayed orientation.
 
 **Usage:**
