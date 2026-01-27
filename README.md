@@ -18,5 +18,4 @@ with open('123x45.png', mode='rb') as f:
 ```
 
 **Installation:**
-`pip install git+ssh://git@gitlab.com/letsenhance/py-fastimage.git`
-- or for specific branch `pip install git+ssh://git@gitlab.com/letsenhance/py-fastimage.git@DLE-600-basic-setup`
+`pip install git+https://github.com/letsenhance/py-fastimage.git`

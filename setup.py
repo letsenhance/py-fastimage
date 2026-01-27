@@ -11,7 +11,7 @@ setuptools.setup(
     description="Read image format and size information from a few first bytes",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://gitlab.com/letsenhance/py-fastimage",
+    url="https://github.com/letsenhance/py-fastimage",
     packages=["fastimage"],
     classifiers=[
         "Programming Language :: Python :: 3",
