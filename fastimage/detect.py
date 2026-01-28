@@ -58,22 +58,102 @@ def jpeg(bytes):
     fhandle.seek(0)
     fhandle.read(2)
     b = fhandle.read(1)
+    orientation = 1
+    width = None
+    height = None
     try:
         while b and ord(b) != 0xDA:
             while ord(b) != 0xFF:
                 b = fhandle.read(1)
             while ord(b) == 0xFF:
                 b = fhandle.read(1)
-            if 0xC0 <= ord(b) <= 0xC3:
-                fhandle.read(3)
-                h, w = struct.unpack('>HH', fhandle.read(4))
+            marker = ord(b)
+            # Stop at SOS (Start Of Scan) marker - image data begins here
+            if marker == 0xDA:
                 break
+            if 0xC0 <= marker <= 0xC3:
+                # Start Of Frame markers contain the image dimensions.
+                # Read the segment length so we can correctly skip any remaining bytes.
+                segment_length = struct.unpack('>H', fhandle.read(2))[0]
+                # Precision (1 byte) + height (2 bytes) + width (2 bytes)
+                fhandle.read(1)
+                h, w = struct.unpack('>HH', fhandle.read(4))
+                width, height = int(w), int(h)
+                # Consume any remaining bytes in this SOF segment to keep parsing aligned.
+                # segment_length includes the 2-byte length field itself, so subtract 2 + bytes already read (1+4=5)
+                remaining = segment_length - 2 - 5
+                if remaining > 0:
+                    fhandle.read(remaining)
+                # Continue scanning for orientation if not found yet
             else:
-                fhandle.read(int(struct.unpack('>H', fhandle.read(2))[0]) - 2)
+                segment_length = int(struct.unpack('>H', fhandle.read(2))[0]) - 2
+                # check for EXIF data in APP1 marker
+                if marker == 0xE1 and segment_length >= 14:
+                    segment_start = fhandle.tell()
+                    exif_header = fhandle.read(6)
+                    if exif_header == b'Exif\x00\x00':
+                        orientation = _read_exif_orientation(fhandle, segment_length - 6)
+                    fhandle.seek(segment_start + segment_length)
+                else:
+                    fhandle.read(segment_length)
             b = fhandle.read(1)
-        return int(w), int(h)
+        
+        if width is not None and height is not None:
+            # swap dimensions for orientations 5, 6, 7, 8 (90 or 270 degree rotations)
+            if orientation in {5, 6, 7, 8}:
+                width, height = height, width
+            return width, height
+        return None
     except Exception:
         return None
+
+
+def _read_exif_orientation(fhandle, max_length):
+    """Read EXIF orientation from APP1 segment."""
+    try:
+        start_pos = fhandle.tell()
+        # read TIFF header (byte order)
+        byte_order = fhandle.read(2)
+        if byte_order not in {b'MM', b'II'}:
+            return 1
+        
+        bo_char = '>' if byte_order == b'MM' else '<'
+        
+        # check TIFF magic number (should be 42)
+        magic = struct.unpack(bo_char + 'H', fhandle.read(2))[0]
+        if magic != 42:
+            return 1
+        
+        # get IFD0 offset
+        ifd_offset = struct.unpack(bo_char + 'I', fhandle.read(4))[0]
+        
+        # seek to IFD0
+        fhandle.seek(start_pos + ifd_offset)
+        
+        # read number of entries
+        if fhandle.tell() - start_pos + 2 > max_length:
+            return 1
+        num_entries = struct.unpack(bo_char + 'H', fhandle.read(2))[0]
+        
+        # read IFD entries looking for orientation tag (0x0112)
+        for _ in range(num_entries):
+            if fhandle.tell() - start_pos + 12 > max_length:
+                break
+            tag = struct.unpack(bo_char + 'H', fhandle.read(2))[0]
+            field_type = struct.unpack(bo_char + 'H', fhandle.read(2))[0]
+            count = struct.unpack(bo_char + 'I', fhandle.read(4))[0]
+            value_offset = fhandle.read(4)
+            
+            if tag == 0x0112:  # orientation tag
+                if field_type == 3 and count == 1:  # SHORT type
+                    orientation = struct.unpack(bo_char + 'H', value_offset[:2])[0]
+                    if 1 <= orientation <= 8:
+                        return orientation
+                break
+        
+        return 1
+    except Exception:
+        return 1
 
 
 def webp(bytes):
@@ -156,12 +236,13 @@ def tiff(bytes):
         ifdEntrySize = 12
         width = None
         height = None
+        orientation = 1
         for i in range(ifdEntryCount):
             entryOffset = ifdOffset + countSize + i * ifdEntrySize
             input.seek(entryOffset)
             tag = input.read(2)
             tag = struct.unpack(boChar + 'H', tag)[0]
-            if tag == 256 or tag == 257:
+            if tag in {256, 257, 274}:  # width, height, orientation
                 # if type indicates that value fits into 4 bytes, value
                 # offset is not an offset but value itself
                 type = input.read(2)
@@ -176,10 +257,17 @@ def tiff(bytes):
                 value = int(struct.unpack(typeChar, value)[0])
                 if tag == 256:
                     width = value
-                else:
+                elif tag == 257:
                     height = value
+                elif tag == 274:
+                    orientation = value if 1 <= value <= 8 else 1
             if width is not None and width > -1 and height is not None and height > -1:
-                return width, height
+                # check if we still need to look for orientation
+                if orientation != 1 or i == ifdEntryCount - 1:
+                    # swap dimensions for orientations 5, 6, 7, 8 (90 or 270 degree rotations)
+                    if orientation in {5, 6, 7, 8}:
+                        width, height = height, width
+                    return width, height
     except struct.error:
         pass
     return None
@@ -349,10 +437,13 @@ def bytes_to_size_fmt(bytes) -> Tuple[Optional[Tuple[int, int]], Optional[str]]:
     """
     Get image file size and type based on header, for best result use whole file.
 
+    Automatically handles rotation metadata (EXIF orientation for JPEG/TIFF, irot box for HEIC/AVIF).
+    Dimensions are swapped for 90° and 270° rotations to match displayed orientation.
+
     In some edge cases: (e.g. large metadata) we can determinate only format without image size info
     :param bytes: header or whole image
     :return:
-        ((w,h), format) - known image
+        ((w,h), format) - known image with corrected dimensions based on rotation metadata
         (None, format) - can not determinate size info
         (None, None) - unknown image format
     """
